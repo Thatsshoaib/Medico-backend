@@ -1,7 +1,7 @@
 const mysql = require("mysql2");
 
 const db = mysql.createPool({
-  host: "localhost",             // ✅ Local MySQL server
+  host: "127.0.0.1",             // ✅ Local MySQL server
   user: "root",                  // ✅ Default MySQL user (change if needed)
   password: "Raza@1105",         // ✅ Your actual password (keep secure)
   database: "medisales",         // ✅ Your database name
