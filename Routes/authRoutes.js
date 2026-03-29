@@ -6,7 +6,7 @@ const router = express.Router();
 // ✅ Correctly Define Routes
 router.post("/register", registerUser);
 router.post("/login", loginUser);
-router.get("/current-mr", getCurrentMr); // Ensure `getCurrentMr` is a function
+router.get("/current-mr", getCurrentMr);
 
 // ✅ Correctly Export the Router
 module.exports = router;

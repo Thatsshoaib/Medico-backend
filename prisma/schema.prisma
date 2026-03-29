@@ -1,0 +1,131 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  name      String
+  email     String   @unique
+  password  String
+  role      String   @default("user")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  stores    Store[]   @relation("UserStores")
+  mrs       MR[]
+  sales     Sale[]
+  attendance Attendance[]
+  stock     Stock[]
+  address   Address[]
+}
+
+model Store {
+  id          Int      @id @default(autoincrement())
+  name        String
+  location    String
+  contact     String
+  userId      Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relations
+  user        User?    @relation("UserStores", fields: [userId], references: [id])
+  mrs         MR[]
+  stock       Stock[]
+  sales       Sale[]
+  address     Address?
+}
+
+model MR {
+  id          Int      @id @default(autoincrement())
+  name        String
+  email       String   @unique
+  phone       String
+  territory   String
+  storeId     Int?
+  userId      Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relations
+  store       Store?    @relation(fields: [storeId], references: [id])
+  user        User?     @relation(fields: [userId], references: [id])
+  attendance  Attendance[]
+  sales       Sale[]
+}
+
+model Sale {
+  id          Int       @id @default(autoincrement())
+  productName String
+  quantity    Int
+  price       Float
+  totalAmount Float
+  saleDate    DateTime  @default(now())
+  storeId     Int?
+  mrId        Int?
+  userId      Int?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  // Relations
+  store       Store?    @relation(fields: [storeId], references: [id])
+  mr          MR?       @relation(fields: [mrId], references: [id])
+  user        User?     @relation(fields: [userId], references: [id])
+}
+
+model Attendance {
+  id           Int       @id @default(autoincrement())
+  date         DateTime  @default(now())
+  status       String    // present, absent, late, half-day
+  checkInTime  DateTime?
+  checkOutTime DateTime?
+  mrId         Int?
+  userId       Int?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  
+  // Relations
+  mr           MR?       @relation(fields: [mrId], references: [id])
+  user         User?     @relation(fields: [userId], references: [id])
+}
+
+model Stock {
+  id          Int       @id @default(autoincrement())
+  productName String
+  quantity    Int
+  minQuantity Int       @default(0)
+  maxQuantity Int       @default(1000)
+  price       Float
+  expiryDate  DateTime?
+  storeId     Int?
+  userId      Int?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  // Relations
+  store       Store?    @relation(fields: [storeId], references: [id])
+  user        User?     @relation(fields: [userId], references: [id])
+}
+
+model Address {
+  id          Int       @id @default(autoincrement())
+  street      String
+  city        String
+  state       String
+  pincode     String
+  country     String    @default("India")
+  storeId     Int?      @unique
+  userId      Int?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  // Relations
+  store       Store?    @relation(fields: [storeId], references: [id])
+  user        User?     @relation(fields: [userId], references: [id])
+}
