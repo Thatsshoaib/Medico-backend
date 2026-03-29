@@ -5,9 +5,14 @@ const path = require("path");
 
 dotenv.config();
 
+// ✅ 🔥 FIX BigInt serialization (IMPORTANT)
+BigInt.prototype.toJSON = function () {
+  return this.toString();
+};
+
 const { PrismaClient } = require("@prisma/client");
 
-// ✅ SIMPLE & CORRECT (Prisma v5)
+// ✅ Prisma Client
 const prisma = new PrismaClient();
 
 const app = express();
@@ -85,4 +90,4 @@ process.on("SIGINT", async () => {
   await prisma.$disconnect();
   console.log("Disconnected Prisma");
   process.exit(0);
-}); 
+});
