@@ -5,7 +5,7 @@ const path = require("path");
 
 dotenv.config();
 
-// ✅ 🔥 FIX BigInt serialization (IMPORTANT)
+// ✅ 🔥 FIX BigInt serialization
 BigInt.prototype.toJSON = function () {
   return this.toString();
 };
@@ -17,19 +17,42 @@ const prisma = new PrismaClient();
 
 const app = express();
 
-// CORS
-const allowedOrigins = ["http://localhost:5173", "http://127.0.0.1:5173"];
-app.use(cors({ origin: allowedOrigins, credentials: true }));
+// ✅ CORS CONFIG (FINAL FIX)
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "https://medico-sandy-seven.vercel.app" // 🔥 VERCEL FRONTEND
+];
 
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      // ✅ allow Postman / mobile apps (no origin)
+      if (!origin) return callback(null, true);
+
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      } else {
+        return callback(new Error("❌ Not allowed by CORS"));
+      }
+    },
+    credentials: true,
+  })
+);
+
+// ✅ Handle preflight requests (IMPORTANT)
+app.options("*", cors());
+
+// ✅ Middleware
 app.use(express.json());
 
-// Prisma middleware
+// ✅ Prisma middleware
 app.use((req, res, next) => {
   req.prisma = prisma;
   next();
 });
 
-// Routes
+// ✅ Routes
 const authRoutes = require("./Routes/authRoutes");
 const storeRoutes = require("./Routes/storeRoutes");
 const mrRoutes = require("./Routes/mrRoutes");
@@ -46,7 +69,7 @@ app.use("/api/attendance", attendanceRoute);
 app.use("/api/stock", stockRoute);
 app.use("/api/address", addressRoute);
 
-// Test route
+// ✅ Test route
 app.get("/api/test", async (req, res) => {
   try {
     const result = await req.prisma.$queryRaw`SELECT 1 as connected`;
@@ -60,13 +83,13 @@ app.get("/api/test", async (req, res) => {
   }
 });
 
-// Serve frontend
+// ✅ Serve frontend (optional)
 app.use(express.static(path.join(__dirname, "dist")));
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "dist", "index.html"));
 });
 
-// Start server
+// ✅ Start server
 const PORT = process.env.PORT || 5000;
 
 async function startServer() {
@@ -85,7 +108,7 @@ async function startServer() {
 
 startServer();
 
-// Graceful shutdown
+// ✅ Graceful shutdown
 process.on("SIGINT", async () => {
   await prisma.$disconnect();
   console.log("Disconnected Prisma");
