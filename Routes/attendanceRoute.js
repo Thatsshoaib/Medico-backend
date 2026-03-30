@@ -1,33 +1,71 @@
-// routes/attendance.js
 const express = require("express");
 const router = express.Router();
-const db = require("../Config/db"); // Your MySQL connection
+const prisma = require('../Config/prisma');
+// Helper → today start & end
+const getTodayRange = () => {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
 
+  const end = new Date();
+  end.setHours(23, 59, 59, 999);
+
+  return { start, end };
+};
+
+// POST /mark
 router.post("/mark", async (req, res) => {
-  const { mr_id, status, photo } = req.body;
-
-  if (!mr_id || !status || !photo) {
-    return res.status(400).json({ message: "MR ID, status, and photo are required" });
-  }
-
   try {
-    // Check if attendance already marked today
-    const [existing] = await db.execute(
-      `SELECT * FROM attendance WHERE mr_id = ? AND date = CURRENT_DATE`,
-      [mr_id]
-    );
+    const { mr_id, status, photo } = req.body;
 
-    if (existing.length > 0) {
-      return res.status(409).json({ message: "Attendance already marked for today" });
+    // ✅ Validation
+    if (!mr_id || !status || !photo) {
+      return res.status(400).json({
+        message: "MR ID, status, and photo are required",
+      });
     }
 
-    // Insert attendance including photo
-    await db.execute(
-      `INSERT INTO attendance (mr_id, status, photo) VALUES (?, ?, ?)`,
-      [mr_id, status, photo]
-    );
+    // ✅ Check MR exists (important security)
+    const mr = await prisma.mR.findUnique({
+      where: { id: Number(mr_id) }
+    });
 
-    res.status(201).json({ message: "Attendance marked successfully" });
+    if (!mr) {
+      return res.status(404).json({ message: "MR not found" });
+    }
+
+    // ✅ Check today's attendance
+    const { start, end } = getTodayRange();
+
+    const existing = await prisma.attendance.findFirst({
+      where: {
+        mr_id: Number(mr_id),
+        date: {
+          gte: start,
+          lte: end
+        }
+      }
+    });
+
+    if (existing) {
+      return res.status(409).json({
+        message: "Attendance already marked for today"
+      });
+    }
+
+    // ✅ Create attendance
+    const newAttendance = await prisma.attendance.create({
+      data: {
+        mr_id: Number(mr_id),
+        status,
+        photo
+      }
+    });
+
+    res.status(201).json({
+      message: "Attendance marked successfully",
+      data: newAttendance
+    });
+
   } catch (error) {
     console.error("Error marking attendance:", error);
     res.status(500).json({ message: "Internal server error" });
@@ -35,43 +73,70 @@ router.post("/mark", async (req, res) => {
 });
 
 
-// backend route example (add to your attendance routes)
+// GET /status/:mr_id
 router.get("/status/:mr_id", async (req, res) => {
-  const { mr_id } = req.params;
   try {
-    const [existing] = await db.execute(
-      `SELECT * FROM attendance WHERE mr_id = ? AND DATE(date) = CURDATE()`,
-      [mr_id]
-    );
-    res.json({ attendanceMarked: existing.length > 0 });
+    const mr_id = Number(req.params.mr_id);
+
+    const { start, end } = getTodayRange();
+
+    const existing = await prisma.attendance.findFirst({
+      where: {
+        mr_id,
+        date: {
+          gte: start,
+          lte: end
+        }
+      }
+    });
+
+    res.json({ attendanceMarked: !!existing });
+
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Internal server error" });
   }
 });
 
-router.get('/history', async (req, res) => {
-  try {
-    const sql = `
-       SELECT 
-        a.id, 
-        a.mr_id, 
-        mrs.name AS mr_name, 
-        a.status, 
-        a.date,
-        a.photo
-      FROM attendance a
-      JOIN mrs ON a.mr_id = mrs.id
-      ORDER BY a.date DESC
-    `;
 
-    const [attendance] = await db.query(sql);
-    res.status(200).json({ success: true, attendance });
+// GET /history
+router.get("/history", async (req, res) => {
+  try {
+    const attendance = await prisma.attendance.findMany({
+      include: {
+        mr: {
+          select: {
+            name: true
+          }
+        }
+      },
+      orderBy: {
+        date: "desc"
+      }
+    });
+
+    // Format response like your old API
+    const formatted = attendance.map(a => ({
+      id: a.id,
+      mr_id: a.mr_id,
+      mr_name: a.mr.name,
+      status: a.status,
+      date: a.date,
+      photo: a.photo
+    }));
+
+    res.status(200).json({
+      success: true,
+      attendance: formatted
+    });
+
   } catch (error) {
-    console.error("❌ Error fetching attendance data:", error);
-    res.status(500).json({ success: false, message: "Internal Server Error" });
+    console.error("❌ Error fetching attendance:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal Server Error"
+    });
   }
 });
-
 
 module.exports = router;

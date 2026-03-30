@@ -1,206 +1,191 @@
-// const express = require("express");
-// const {
-//   addSales,
-//   addBulkSales,
-//   getTodaysSalesForMR,
-//   getAllSales
-// } = require("../Controller/salesController"); // Update the path
-
-// const router = express.Router();
-
-// router.post("/", addSales);
-// router.post("/bulk", addBulkSales);
-// router.get("/today/:mr_id", getTodaysSalesForMR);
-// router.get("/all", getAllSales);
-
-// module.exports = router;
-
-// routes/sales.js
-
 const express = require("express");
 const router = express.Router();
-const db = require("../Config/db"); 
 
 router.post("/add", async (req, res) => {
-  const { mr_id, store_id, total_sales, date, photo } = req.body;
-
-  if (!photo) {
-    return res.status(400).json({ error: "Photo is required" });
-  }
-
   try {
-    const [result] = await db.query(
-      `INSERT INTO sales (mr_id, store_id, total_sales, date, photo) VALUES (?, ?, ?, ?, ?)`,
-      [mr_id, store_id, total_sales, date, photo]
-    );
-    res.status(201).json({ saleID: result.insertId });
+    const { mr_id, store_id, total_sales, date, photo } = req.body;
+
+    if (!mr_id || !store_id || !total_sales || !date || !photo) {
+      return res.status(400).json({ error: "All fields required" });
+    }
+
+    const sale = await prisma.sale.create({
+      data: {
+        mrId: Number(mr_id),
+        storeId: Number(store_id),
+        totalSales: Number(total_sales),
+        date: new Date(date),
+        photo
+      }
+    });
+
+    res.status(201).json({ saleID: sale.id });
+
   } catch (error) {
-    console.error("Error inserting sale:", error);
-    res.status(500).json({ error: "Failed to create sale summary" });
+    console.error(error);
+    res.status(500).json({ error: "Failed to create sale" });
   }
 });
 
-// Add medicine sales details
+
 router.post("/salesdetail", async (req, res) => {
-  console.log("POST /salesdetail route hit");
-  const { saleID, medicine_name, quantity, price, total_price, date } =
-    req.body;
-  console.log("Request body:", req.body);
-
-  if (
-    !saleID ||
-    !medicine_name ||
-    !quantity ||
-    !price ||
-    !total_price ||
-    !date
-  ) {
-    return res.status(400).json({ error: "Missing required fields" });
-  }
-
   try {
-    // Insert sale detail
-    console.log("Inserting sale detail...");
-    await db.query(
-      `INSERT INTO salesdetail (saleID, medicine_name, quantity, price, total_price, date) VALUES (?, ?, ?, ?, ?, ?)`,
-      [saleID, medicine_name, quantity, price, total_price, date]
-    );
-    console.log("Sale detail inserted.");
+    const { saleID, medicine_name, quantity, price, total_price, date } = req.body;
 
-    // Fetch current total_quantity from stock for this medicine
-    const [stockRows] = await db.query(
-      `SELECT total_quantity FROM stock WHERE medicine_name = ?`,
-      [medicine_name]
-    );
-    console.log("Stock rows:", stockRows);
-
-    if (stockRows.length === 0) {
-      console.log("Medicine not found in stock");
-      return res.status(404).json({ error: "Medicine not found in stock" });
+    if (!saleID || !medicine_name || !quantity || !price || !total_price || !date) {
+      return res.status(400).json({ error: "Missing required fields" });
     }
 
-    const currentLeftQuantity = stockRows[0].total_quantity;
-    console.log("Current left quantity:", currentLeftQuantity);
+    await prisma.$transaction(async (tx) => {
 
-    const newLeftQuantity = currentLeftQuantity - quantity;
-    console.log("New left quantity:", newLeftQuantity);
+      // ✅ Check stock
+      const stock = await tx.stock.findUnique({
+        where: { medicineName: medicine_name }
+      });
 
-    if (newLeftQuantity < 0) {
-      console.log("Insufficient stock");
-      return res.status(400).json({ error: "Insufficient stock quantity" });
-    }
+      if (!stock) {
+        throw new Error("Medicine not found in stock");
+      }
 
-    // Update stock total_quantity
-    await db.query(
-      `UPDATE stock SET total_quantity = ? WHERE medicine_name = ?`,
-      [newLeftQuantity, medicine_name]
-    );
-    console.log("Stock updated successfully.");
+      if (stock.totalQuantity < quantity) {
+        throw new Error("Insufficient stock");
+      }
 
-    res
-      .status(201)
-      .json({ message: "Sale detail added and stock updated successfully" });
+      // ✅ Create sale detail
+      await tx.saleDetail.create({
+        data: {
+          saleId: Number(saleID),
+          medicineName: medicine_name,
+          quantity: Number(quantity),
+          price: Number(price),
+          totalPrice: Number(total_price),
+          date: new Date(date)
+        }
+      });
+
+      // ✅ Update stock
+      await tx.stock.update({
+        where: { medicineName: medicine_name },
+        data: {
+          totalQuantity: stock.totalQuantity - quantity
+        }
+      });
+
+    });
+
+    res.status(201).json({
+      message: "Sale detail added & stock updated"
+    });
+
   } catch (error) {
-    console.error("Error inserting sale detail or updating stock:", error);
-    res
-      .status(500)
-      .json({ error: "Failed to add sale detail or update stock" });
+    console.error(error.message);
+    res.status(400).json({ error: error.message });
   }
 });
 
-//route tp get sales per MR
+
 router.get("/currentday-sales/mr/:mrId", async (req, res) => {
-  const mrId = req.params.mrId;
-
-  if (!mrId) {
-    return res.status(400).json({ error: "MR ID is required" });
-  }
-
   try {
-    const sql = `
-      SELECT 
-  s.saleID AS sale_id,
-  s.total_sales,
-  s.date AS sale_date,
-  s.photo,
-  sd.salesdetailID AS detail_id,
-  sd.medicine_name,
-  sd.quantity,
-  sd.price,
-  sd.total_price,
-  sd.date AS detail_date,
-  ms.id AS store_id,
-  ms.name AS store_name
-FROM sales s
-JOIN salesdetail sd ON s.saleID = sd.saleID
-JOIN medical_stores ms ON s.store_id = ms.id
-WHERE s.mr_id = ?
-  AND s.date >= CURDATE()
-  AND s.date < CURDATE() + INTERVAL 1 DAY
-ORDER BY s.date DESC;
+    const mrId = Number(req.params.mrId);
 
-    `;
+    const start = new Date();
+    start.setHours(0,0,0,0);
 
-    const [sales] = await db.query(sql, [mrId]);
-    res.json(sales);
+    const end = new Date();
+    end.setHours(23,59,59,999);
+
+    const sales = await prisma.sale.findMany({
+      where: {
+        mrId,
+        date: { gte: start, lte: end }
+      },
+      include: {
+        store: true,
+        details: true
+      },
+      orderBy: { date: "desc" }
+    });
+
+    const formatted = sales.flatMap(sale =>
+      sale.details.map(detail => ({
+        sale_id: sale.id,
+        total_sales: sale.totalSales,
+        sale_date: sale.date,
+        photo: sale.photo,
+        detail_id: detail.id,
+        medicine_name: detail.medicineName,
+        quantity: detail.quantity,
+        price: detail.price,
+        total_price: detail.totalPrice,
+        store_id: sale.store.id,
+        store_name: sale.store.name
+      }))
+    );
+
+    res.json(formatted);
+
   } catch (error) {
-    console.error("Error fetching sales for MR:", error);
+    console.error(error);
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
 
+
 router.get("/all", async (req, res) => {
   try {
     const { filter, startDate, endDate } = req.query;
-    let sql = `
-     SELECT s.saleID, sd.medicine_name, sd.quantity, sd.price, s.date,
-       mrs.name AS mr_name, stores.name AS store_name
-FROM sales s
-JOIN salesdetail sd ON s.saleID = sd.saleID
-JOIN mrs ON s.mr_id = mrs.id
-JOIN medical_stores stores ON s.store_id = stores.id
 
-    `;
+    let where = {};
 
-    let params = [];
-    let conditions = [];
+    const now = new Date();
 
     if (filter) {
-      switch (filter) {
-        case "last7days":
-          conditions.push(`s.date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)`);
-          break;
-        case "last15days":
-          conditions.push(`s.date >= DATE_SUB(CURDATE(), INTERVAL 15 DAY)`);
-          break;
-        case "last30days":
-          conditions.push(`s.date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)`);
-          break;
-        case "previousMonth":
-          conditions.push(
-            `MONTH(s.date) = MONTH(CURDATE()) - 1 AND YEAR(s.date) = YEAR(CURDATE())`
-          );
-          break;
+      if (filter === "last7days") {
+        where.date = { gte: new Date(now.setDate(now.getDate() - 7)) };
+      }
+      if (filter === "last15days") {
+        where.date = { gte: new Date(now.setDate(now.getDate() - 15)) };
+      }
+      if (filter === "last30days") {
+        where.date = { gte: new Date(now.setDate(now.getDate() - 30)) };
       }
     }
 
     if (startDate && endDate) {
-      conditions.push(`s.date BETWEEN ? AND ?`);
-      params.push(startDate, endDate);
+      where.date = {
+        gte: new Date(startDate),
+        lte: new Date(endDate)
+      };
     }
 
-    if (conditions.length > 0) {
-      sql += ` WHERE ` + conditions.join(" AND ");
-    }
+    const sales = await prisma.sale.findMany({
+      where,
+      include: {
+        mr: true,
+        store: true,
+        details: true
+      },
+      orderBy: { date: "desc" }
+    });
 
-    sql += ` ORDER BY s.date DESC`;
+    const formatted = sales.flatMap(sale =>
+      sale.details.map(d => ({
+        saleID: sale.id,
+        medicine_name: d.medicineName,
+        quantity: d.quantity,
+        price: d.price,
+        date: sale.date,
+        mr_name: sale.mr.name,
+        store_name: sale.store.name
+      }))
+    );
 
-    const [sales] = await db.query(sql, params);
-    res.status(200).json({ success: true, sales });
+    res.status(200).json({ success: true, sales: formatted });
+
   } catch (error) {
-    console.error("❌ Error fetching sales with filters:", error);
-    res.status(500).json({ success: false, message: "Internal Server Error" });
+    console.error(error);
+    res.status(500).json({ success: false });
   }
 });
 
-module.exports = router;
+module.exports = router; 

@@ -1,6 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
-   binaryTargets = ["native", "debian-openssl-3.0.x"]
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
 datasource db {
@@ -16,84 +16,95 @@ model User {
   role      String   @default("user")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  
-  // Relations
-  stores    Store[]   @relation("UserStores")
-  mrs       MR[]
-  sales     Sale[]
-  attendance Attendance[]
-  stock     Stock[]
-  address   Address[]
-}
 
-model Store {
-  id          Int      @id @default(autoincrement())
-  name        String
-  location    String
-  contact     String
-  userId      Int?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  
-  // Relations
-  user        User?    @relation("UserStores", fields: [userId], references: [id])
-  mrs         MR[]
-  stock       Stock[]
-  sales       Sale[]
-  address     Address?
+  stores     Store[]      @relation("UserStores")
+  mrs        MR[]
+  sales      Sale[]
+  attendance Attendance[]
+  stock      Stock[]
 }
 
 model MR {
-  id          Int      @id @default(autoincrement())
-  name        String
-  email       String   @unique
-  phone       String
-  territory   String
-  storeId     Int?
-  userId      Int?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  
-  // Relations
-  store       Store?    @relation(fields: [storeId], references: [id])
-  user        User?     @relation(fields: [userId], references: [id])
-  attendance  Attendance[]
-  sales       Sale[]
+  id        Int      @id @default(autoincrement())
+  name      String
+  email     String   @unique
+  phone     String
+  territory String?
+  salary    Float?
+  userId    Int?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user       User?        @relation(fields: [userId], references: [id])
+  attendance Attendance[]
+  sales      Sale[]
+
+  // ✅ Junction relation
+  mrStores MRStore[]
+}
+
+model Store {
+  id        Int      @id @default(autoincrement())
+  name      String
+  address   String?
+  contact   String?
+  userId    Int?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User? @relation("UserStores", fields: [userId], references: [id])
+
+  // ✅ Junction relation
+  mrStores MRStore[]
+
+  stock Stock[]
+  sales Sale[]
+}
+
+model MRStore {
+  mrId       Int
+  storeId    Int
+  assignedAt DateTime @default(now())
+
+  // ✅ Proper bidirectional relation
+  mr    MR    @relation(fields: [mrId], references: [id])
+  store Store @relation(fields: [storeId], references: [id])
+
+  @@id([mrId, storeId])
+  @@map("mr_stores")
 }
 
 model Sale {
-  id          Int       @id @default(autoincrement())
+  id          Int      @id @default(autoincrement())
   productName String
   quantity    Int
   price       Float
   totalAmount Float
-  saleDate    DateTime  @default(now())
+  saleDate    DateTime @default(now())
   storeId     Int?
   mrId        Int?
   userId      Int?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  
-  // Relations
-  store       Store?    @relation(fields: [storeId], references: [id])
-  mr          MR?       @relation(fields: [mrId], references: [id])
-  user        User?     @relation(fields: [userId], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  store Store? @relation(fields: [storeId], references: [id])
+  mr    MR?    @relation(fields: [mrId], references: [id])
+  user  User?  @relation(fields: [userId], references: [id])
 }
 
 model Attendance {
   id           Int       @id @default(autoincrement())
   date         DateTime  @default(now())
-  status       String    // present, absent, late, half-day
+  status       String
   checkInTime  DateTime?
   checkOutTime DateTime?
   mrId         Int?
   userId       Int?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
-  
-  // Relations
-  mr           MR?       @relation(fields: [mrId], references: [id])
-  user         User?     @relation(fields: [userId], references: [id])
+
+  mr   MR?   @relation(fields: [mrId], references: [id])
+  user User? @relation(fields: [userId], references: [id])
 }
 
 model Stock {
@@ -108,25 +119,7 @@ model Stock {
   userId      Int?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
-  
-  // Relations
-  store       Store?    @relation(fields: [storeId], references: [id])
-  user        User?     @relation(fields: [userId], references: [id])
-}
 
-model Address {
-  id          Int       @id @default(autoincrement())
-  street      String
-  city        String
-  state       String
-  pincode     String
-  country     String    @default("India")
-  storeId     Int?      @unique
-  userId      Int?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  
-  // Relations
-  store       Store?    @relation(fields: [storeId], references: [id])
-  user        User?     @relation(fields: [userId], references: [id])
+  store Store? @relation(fields: [storeId], references: [id])
+  user  User?  @relation(fields: [userId], references: [id])
 }

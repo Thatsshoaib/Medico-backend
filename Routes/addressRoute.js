@@ -1,40 +1,52 @@
 // routes/address.js
 const express = require('express');
 const router = express.Router();
-const db = require('../Config/db');
+const prisma = require('../Config/prisma'); // 👈 prisma client
 
-// POST /api/address
-router.post('/add-address', (req, res) => {
-  const { address_line1 } = req.body;
+// POST /api/address/add-address
+router.post('/add-address', async (req, res) => {
+  try {
+    const { address_line1 } = req.body;
 
-  if (!address_line1) {
-    return res.status(400).json({ error: 'Address Line 1 is required' });
-  }
-
-  const query = 'INSERT INTO address (address_line1) VALUES (?)';
-  db.query(query, [address_line1 || null], (err, result) => {
-    if (err) {
-      console.error('Error inserting address:', err);
-      return res.status(500).json({ error: 'Database error' });
+    // ✅ Validation
+    if (!address_line1 || address_line1.trim().length < 5) {
+      return res.status(400).json({ 
+        error: 'Valid Address Line 1 is required (min 5 chars)' 
+      });
     }
+
+    // ✅ Create using Prisma
+    const newAddress = await prisma.address.create({
+      data: {
+        address_line1: address_line1.trim()
+      }
+    });
 
     res.status(201).json({
       message: 'Address added successfully',
-      addressId: result.insertId,
+      data: newAddress
     });
-  });
-});
 
-
-router.get('/all-address', async (req, res) => {
-  try {
-    const [results] = await db.query('SELECT * FROM address');
-    res.json(results);
-  } catch (err) {
-    console.error('Error fetching addresses:', err);
-    res.status(500).json({ error: 'Database error' });
+  } catch (error) {
+    console.error('Error inserting address:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
+
+// GET /api/address/all-address
+router.get('/all-address', async (req, res) => {
+  try {
+    const addresses = await prisma.address.findMany({
+      orderBy: { id: 'desc' }
+    });
+
+    res.json(addresses);
+
+  } catch (error) {
+    console.error('Error fetching addresses:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 module.exports = router;

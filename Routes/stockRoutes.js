@@ -1,71 +1,98 @@
-const express = require('express');
+const express = require("express");
 const router = express.Router();
-const db = require('../Config/db'); // adjust path if needed
 
-// @access  Admin (authentication middleware can be added later)
 router.post("/add", async (req, res) => {
-  const { dealer_name, medicines } = req.body;
-
-  if (!dealer_name || !Array.isArray(medicines) || medicines.length === 0) {
-    return res.status(400).json({ message: "Dealer name and at least one medicine are required" });
-  }
-
-  const query = `
-    INSERT INTO stock (medicine_name, total_quantity, price, dealer_name, date_added)
-    VALUES (?, ?, ?, ?, CURRENT_DATE())
-  `;
-
   try {
-    const insertResults = [];
+    const { dealer_name, medicines } = req.body;
 
-    for (const med of medicines) {
-      const { medicine_name, quantity, price } = med;
-
-      if (!medicine_name || !quantity || !price) {
-        return res.status(400).json({ message: "Each medicine must have name, quantity, and price" });
-      }
-
-      const [result] = await db.execute(query, [
-        medicine_name,
-        quantity,
-        price,
-        dealer_name,
-      ]);
-
-      insertResults.push({ medicine_name, stockId: result.insertId });
+    if (!dealer_name || !Array.isArray(medicines) || medicines.length === 0) {
+      return res.status(400).json({
+        message: "Dealer name and medicines are required",
+      });
     }
 
-    res.status(201).json({
-      message: "Medicines added successfully",
-      added: insertResults,
+    const results = [];
+
+    await prisma.$transaction(async (tx) => {
+      for (const med of medicines) {
+        const { medicine_name, quantity, price } = med;
+
+        if (!medicine_name || !quantity || !price) {
+          throw new Error("Invalid medicine data");
+        }
+
+        // ✅ UPSERT (insert or update)
+        const stock = await tx.stock.upsert({
+          where: { medicineName: medicine_name },
+          update: {
+            totalQuantity: {
+              increment: Number(quantity),
+            },
+            price: Number(price), // latest price update
+            dealerName: dealer_name
+          },
+          create: {
+            medicineName: medicine_name,
+            totalQuantity: Number(quantity),
+            price: Number(price),
+            dealerName: dealer_name
+          },
+        });
+
+        results.push(stock);
+      }
     });
-  } catch (err) {
-    console.error("Database error:", err);
-    res.status(500).json({ message: "Database error" });
-  }
-});
 
+    res.status(201).json({
+      message: "Stock updated successfully",
+      data: results,
+    });
 
-
-router.get('/get-med', async (req, res) => {
-  try {
-    const [rows] = await db.query('SELECT DISTINCT medicine_name FROM stock');
-    const medicineNames = rows.map(row => row.medicine_name);
-    res.json({ medicines: medicineNames });
   } catch (error) {
-    console.error('Error fetching medicine names:', error);
-    res.status(500).json({ message: 'Database error' });
+    console.error(error);
+    res.status(400).json({ message: error.message });
   }
 });
 
+
+router.get("/get-med", async (req, res) => {
+  try {
+    const meds = await prisma.stock.findMany({
+      select: {
+        medicineName: true,
+      },
+    });
+
+    res.json({
+      medicines: meds.map((m) => m.medicineName),
+    });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Error fetching medicines" });
+  }
+});
 
 router.get("/all-stock", async (req, res) => {
   try {
-    const [rows] = await db.query("SELECT * FROM stock ORDER BY date_added DESC");
-    res.status(200).json({ success: true, stock: rows });
+    const stock = await prisma.stock.findMany({
+      orderBy: {
+        dateAdded: "desc",
+      },
+    });
+
+    res.status(200).json({
+      success: true,
+      stock,
+    });
+
   } catch (error) {
-    console.error("❌ Error fetching stock data:", error);
-    res.status(500).json({ success: false, message: "Internal Server Error" });
+    console.error(error);
+    res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+    });
   }
 });
-module.exports = router;
+
+module.exports = router; 
