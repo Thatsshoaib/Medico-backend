@@ -1,142 +1,189 @@
 const express = require("express");
 const router = express.Router();
-const prisma = require('../Config/prisma');
-// Helper → today start & end
+const prisma = require("../Config/prisma");
+
+// ✅ Helper → IST today range
 const getTodayRange = () => {
-  const start = new Date();
+  const now = new Date(
+    new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" })
+  );
+
+  const start = new Date(now);
   start.setHours(0, 0, 0, 0);
 
-  const end = new Date();
+  const end = new Date(now);
   end.setHours(23, 59, 59, 999);
 
-  return { start, end };
+  return { start, end, now };
 };
 
-// POST /mark
+
+
+// ✅ POST /mark attendance
 router.post("/mark", async (req, res) => {
   try {
-    const { mr_id, status, photo } = req.body;
+    const { mr_id, status } = req.body;
 
     // ✅ Validation
-    if (!mr_id || !status || !photo) {
+    if (!mr_id || !status) {
       return res.status(400).json({
-        message: "MR ID, status, and photo are required",
+        message: "MR ID and status are required",
       });
     }
 
-    // ✅ Check MR exists (important security)
+    const mrId = Number(mr_id);
+
+    if (isNaN(mrId)) {
+      return res.status(400).json({ message: "Invalid MR ID" });
+    }
+
+    // ✅ Validate ENUM
+    const validStatus = ["PRESENT", "ABSENT", "LEAVE"];
+    const finalStatus = status.toUpperCase();
+
+    if (!validStatus.includes(finalStatus)) {
+      return res.status(400).json({
+        message: "Invalid status (PRESENT, ABSENT, LEAVE)",
+      });
+    }
+
+    // ✅ Check MR exists
     const mr = await prisma.mR.findUnique({
-      where: { id: Number(mr_id) }
+      where: { id: mrId },
     });
 
     if (!mr) {
       return res.status(404).json({ message: "MR not found" });
     }
 
-    // ✅ Check today's attendance
-    const { start, end } = getTodayRange();
+    const { start, end, now } = getTodayRange();
 
+    // ✅ Check today's attendance
     const existing = await prisma.attendance.findFirst({
       where: {
-        mr_id: Number(mr_id),
+        mrId: mrId,
         date: {
           gte: start,
-          lte: end
-        }
-      }
+          lte: end,
+        },
+      },
     });
 
     if (existing) {
       return res.status(409).json({
-        message: "Attendance already marked for today"
+        message: "Attendance already marked for today",
       });
     }
 
     // ✅ Create attendance
     const newAttendance = await prisma.attendance.create({
       data: {
-        mr_id: Number(mr_id),
-        status,
-        photo
-      }
+        mrId: mrId,
+        status: finalStatus,
+        date: now,
+        checkInTime: now,
+      },
     });
 
     res.status(201).json({
       message: "Attendance marked successfully",
-      data: newAttendance
+      data: newAttendance,
     });
 
   } catch (error) {
     console.error("Error marking attendance:", error);
+
+    // ✅ Unique constraint safety
+    if (error.code === "P2002") {
+      return res.status(409).json({
+        message: "Attendance already marked",
+      });
+    }
+
     res.status(500).json({ message: "Internal server error" });
   }
 });
 
 
-// GET /status/:mr_id
+
+// ✅ GET /status/:mr_id
 router.get("/status/:mr_id", async (req, res) => {
   try {
-    const mr_id = Number(req.params.mr_id);
+    const mrId = Number(req.params.mr_id);
+
+    if (isNaN(mrId)) {
+      return res.status(400).json({ message: "Invalid MR ID" });
+    }
 
     const { start, end } = getTodayRange();
 
     const existing = await prisma.attendance.findFirst({
       where: {
-        mr_id,
+        mrId: mrId,
         date: {
           gte: start,
-          lte: end
-        }
-      }
+          lte: end,
+        },
+      },
     });
 
-    res.json({ attendanceMarked: !!existing });
+    res.json({
+      attendanceMarked: !!existing,
+      data: existing || null,
+    });
 
   } catch (error) {
-    console.error(error);
+    console.error("Error:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 });
 
 
-// GET /history
+
+// ✅ GET /history
 router.get("/history", async (req, res) => {
   try {
+    const { page = 1, limit = 10 } = req.query;
+
     const attendance = await prisma.attendance.findMany({
+      skip: (page - 1) * limit,
+      take: Number(limit),
       include: {
         mr: {
           select: {
-            name: true
-          }
-        }
+            name: true,
+          },
+        },
       },
       orderBy: {
-        date: "desc"
-      }
+        date: "desc",
+      },
     });
 
-    // Format response like your old API
-    const formatted = attendance.map(a => ({
+    const formatted = attendance.map((a) => ({
       id: a.id,
-      mr_id: a.mr_id,
-      mr_name: a.mr.name,
+      mr_id: a.mrId,
+      mr_name: a.mr?.name || null,
       status: a.status,
       date: a.date,
-      photo: a.photo
+      checkInTime: a.checkInTime,
+      checkOutTime: a.checkOutTime,
     }));
 
     res.status(200).json({
       success: true,
-      attendance: formatted
+      attendance: formatted,
     });
 
   } catch (error) {
     console.error("❌ Error fetching attendance:", error);
     res.status(500).json({
       success: false,
-      message: "Internal Server Error"
+      message: "Internal Server Error",
     });
   }
 });
+
+
 
 module.exports = router;

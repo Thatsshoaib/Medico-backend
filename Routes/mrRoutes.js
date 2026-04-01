@@ -231,24 +231,55 @@ router.put("/edit/:id", async (req, res) => {
 });
 
 // 🔥 DELETE MR
+// 🔥 DELETE MR
 router.delete("/delete/:id", async (req, res) => {
   try {
     const prisma = req.prisma;
     const id = Number(req.params.id);
 
-    await prisma.mRStore.deleteMany({
-      where: { mrId: id }, // ✅ first delete relations
+    // ✅ Pehle check karo MR exist karta hai?
+    const mrExists = await prisma.mR.findUnique({
+      where: { id }
     });
 
-    await prisma.mR.delete({
-      where: { id },
+    console.log("MR Found:", mrExists); // 👈 Debug log
+
+    if (!mrExists) {
+      return res.status(404).json({ error: "MR not found" });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      // 1️⃣ MR fetch with userId
+      const mr = await tx.mR.findUnique({
+        where: { id },
+        select: { userId: true }
+      });
+
+      console.log("MR with userId:", mr); // 👈 Debug log
+
+      // 2️⃣ Delete MRStore relations
+      await tx.mRStore.deleteMany({
+        where: { mrId: id }
+      });
+
+      // 3️⃣ Delete MR
+      await tx.mR.delete({
+        where: { id }
+      });
+
+      // 4️⃣ Delete associated User
+      if (mr?.userId) {
+        await tx.user.delete({
+          where: { id: mr.userId }
+        });
+        console.log(`User with id ${mr.userId} deleted`);
+      }
     });
 
-    res.json({ message: "MR deleted successfully" });
+    res.json({ message: "MR and associated user deleted successfully" });
   } catch (error) {
     console.error("Error deleting MR:", error);
     res.status(500).json({ error: error.message });
   }
 });
-
 module.exports = router;

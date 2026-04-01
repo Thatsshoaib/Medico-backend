@@ -92,21 +92,28 @@ model Sale {
   user  User?  @relation(fields: [userId], references: [id])
 }
 
-model Attendance {
-  id           Int       @id @default(autoincrement())
-  date         DateTime  @default(now())
-  status       String
-  checkInTime  DateTime?
-  checkOutTime DateTime?
-  mrId         Int?
-  userId       Int?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-
-  mr   MR?   @relation(fields: [mrId], references: [id])
-  user User? @relation(fields: [userId], references: [id])
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LEAVE
 }
 
+model Attendance {
+  id           Int               @id @default(autoincrement())
+  date         DateTime          @default(now()) // ✅ REMOVE @db.Date
+  status       AttendanceStatus
+  checkInTime  DateTime?         @default(now())
+  checkOutTime DateTime?
+  mrId         Int
+  userId       Int?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  mr   MR   @relation(fields: [mrId], references: [id])
+  user User? @relation(fields: [userId], references: [id])
+
+  @@unique([mrId, date])
+}
 model Stock {
   id          Int       @id @default(autoincrement())
   productName String
