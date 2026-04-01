@@ -4,6 +4,7 @@ const router = express.Router();
 router.post("/add", async (req, res) => {
   try {
     const { dealer_name, medicines } = req.body;
+    const prisma = req.prisma;
 
     if (!dealer_name || !Array.isArray(medicines) || medicines.length === 0) {
       return res.status(400).json({
@@ -21,23 +22,33 @@ router.post("/add", async (req, res) => {
           throw new Error("Invalid medicine data");
         }
 
-        // ✅ UPSERT (insert or update)
-        const stock = await tx.stock.upsert({
-          where: { medicineName: medicine_name },
-          update: {
-            totalQuantity: {
-              increment: Number(quantity),
-            },
-            price: Number(price), // latest price update
-            dealerName: dealer_name
-          },
-          create: {
-            medicineName: medicine_name,
-            totalQuantity: Number(quantity),
-            price: Number(price),
-            dealerName: dealer_name
-          },
+        // ✅ Check if stock exists by productName
+        const existingStock = await tx.stock.findFirst({
+          where: { productName: medicine_name }
         });
+
+        let stock;
+        if (existingStock) {
+          // Update existing stock
+          stock = await tx.stock.update({
+            where: { id: existingStock.id },
+            data: {
+              quantity: {
+                increment: Number(quantity),
+              },
+              price: Number(price),
+            },
+          });
+        } else {
+          // Create new stock
+          stock = await tx.stock.create({
+            data: {
+              productName: medicine_name,
+              quantity: Number(quantity),
+              price: Number(price),
+            },
+          });
+        }
 
         results.push(stock);
       }
@@ -54,17 +65,18 @@ router.post("/add", async (req, res) => {
   }
 });
 
-
 router.get("/get-med", async (req, res) => {
   try {
+    const prisma = req.prisma;
+    
     const meds = await prisma.stock.findMany({
       select: {
-        medicineName: true,
+        productName: true,
       },
     });
 
     res.json({
-      medicines: meds.map((m) => m.medicineName),
+      medicines: meds.map((m) => m.productName),
     });
 
   } catch (error) {
@@ -75,9 +87,11 @@ router.get("/get-med", async (req, res) => {
 
 router.get("/all-stock", async (req, res) => {
   try {
+    const prisma = req.prisma;
+    
     const stock = await prisma.stock.findMany({
       orderBy: {
-        dateAdded: "desc",
+        createdAt: "desc",
       },
     });
 
@@ -95,4 +109,4 @@ router.get("/all-stock", async (req, res) => {
   }
 });
 
-module.exports = router; 
+module.exports = router;

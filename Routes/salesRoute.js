@@ -1,15 +1,16 @@
 const express = require("express");
 const router = express.Router();
 
+// ➕ ADD SALE
 router.post("/add", async (req, res) => {
   try {
     const { mr_id, store_id, total_sales, date, photo } = req.body;
 
-    if (!mr_id || !store_id || !total_sales || !date || !photo) {
+    if (!mr_id || !store_id || !total_sales || !date) {
       return res.status(400).json({ error: "All fields required" });
     }
 
-    const sale = await prisma.sale.create({
+    const sale = await req.prisma.sale.create({
       data: {
         mrId: Number(mr_id),
         storeId: Number(store_id),
@@ -28,6 +29,7 @@ router.post("/add", async (req, res) => {
 });
 
 
+// 💊 ADD SALE DETAIL
 router.post("/salesdetail", async (req, res) => {
   try {
     const { saleID, medicine_name, quantity, price, total_price, date } = req.body;
@@ -36,7 +38,7 @@ router.post("/salesdetail", async (req, res) => {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    await prisma.$transaction(async (tx) => {
+    await req.prisma.$transaction(async (tx) => {
 
       // ✅ Check stock
       const stock = await tx.stock.findUnique({
@@ -84,17 +86,18 @@ router.post("/salesdetail", async (req, res) => {
 });
 
 
+// 📅 CURRENT DAY SALES
 router.get("/currentday-sales/mr/:mrId", async (req, res) => {
   try {
     const mrId = Number(req.params.mrId);
 
     const start = new Date();
-    start.setHours(0,0,0,0);
+    start.setHours(0, 0, 0, 0);
 
     const end = new Date();
-    end.setHours(23,59,59,999);
+    end.setHours(23, 59, 59, 999);
 
-    const sales = await prisma.sale.findMany({
+    const sales = await req.prisma.sale.findMany({
       where: {
         mrId,
         date: { gte: start, lte: end }
@@ -131,23 +134,23 @@ router.get("/currentday-sales/mr/:mrId", async (req, res) => {
 });
 
 
+// 📊 ALL SALES
 router.get("/all", async (req, res) => {
   try {
     const { filter, startDate, endDate } = req.query;
 
     let where = {};
-
     const now = new Date();
 
     if (filter) {
       if (filter === "last7days") {
-        where.date = { gte: new Date(now.setDate(now.getDate() - 7)) };
+        where.date = { gte: new Date(new Date().setDate(now.getDate() - 7)) };
       }
       if (filter === "last15days") {
-        where.date = { gte: new Date(now.setDate(now.getDate() - 15)) };
+        where.date = { gte: new Date(new Date().setDate(now.getDate() - 15)) };
       }
       if (filter === "last30days") {
-        where.date = { gte: new Date(now.setDate(now.getDate() - 30)) };
+        where.date = { gte: new Date(new Date().setDate(now.getDate() - 30)) };
       }
     }
 
@@ -158,7 +161,7 @@ router.get("/all", async (req, res) => {
       };
     }
 
-    const sales = await prisma.sale.findMany({
+    const sales = await req.prisma.sale.findMany({
       where,
       include: {
         mr: true,
@@ -188,4 +191,4 @@ router.get("/all", async (req, res) => {
   }
 });
 
-module.exports = router; 
+module.exports = router;
