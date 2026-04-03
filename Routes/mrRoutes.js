@@ -1,27 +1,15 @@
 const express = require("express");
 const router = express.Router();
 const bcrypt = require("bcryptjs");
-// ✅ USE req.prisma (best practice)
 
-// 🔥 ADD MR
-
+// 🔥 ADD MR - Fixed Transaction Timeout
 router.post("/add", async (req, res) => {
   try {
     const prisma = req.prisma;
-
     const { name, email, phone, password, assignedStores, salary } = req.body;
 
     // ✅ Validation
-    if (
-      !name ||
-      !email ||
-      !phone ||
-      !password ||
-      !Array.isArray(assignedStores) ||
-      assignedStores.length === 0 ||
-      !salary ||
-      isNaN(Number(salary))
-    ) {
+    if (!name || !email || !phone || !password || !salary || isNaN(Number(salary))) {
       return res.status(400).json({
         error: "All fields required",
       });
@@ -38,19 +26,13 @@ router.post("/add", async (req, res) => {
 
     // ✅ Fetch stores
     const stores = await prisma.store.findMany({
-      where: { name: { in: assignedStores } },
+      where: { name: { in: assignedStores || [] } },
     });
-
-    if (stores.length !== assignedStores.length) {
-      return res.status(400).json({
-        error: "Some stores not found",
-      });
-    }
 
     // ✅ Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // ✅ TRANSACTION
+    // ✅ USE TRANSACTION WITH TIMEOUT
     const result = await prisma.$transaction(async (tx) => {
       // 1️⃣ Create USER
       const user = await tx.user.create({
@@ -62,31 +44,38 @@ router.post("/add", async (req, res) => {
         },
       });
 
-      // 2️⃣ Create MR (linked to user)
+      // 2️⃣ Create MR
       const mr = await tx.mR.create({
         data: {
           name,
           email,
           phone,
           salary: Number(salary),
-          userId: user.id, // ✅ LINK
+          userId: user.id,
         },
       });
 
-      // 3️⃣ Assign stores
-      await tx.mRStore.createMany({
-        data: stores.map((store) => ({
-          mrId: mr.id,
-          storeId: store.id,
-        })),
-      });
+      // 3️⃣ Assign stores (if any)
+      if (stores.length > 0) {
+        // Use createMany for better performance
+        await tx.mRStore.createMany({
+          data: stores.map((store) => ({
+            mrId: mr.id,
+            storeId: store.id,
+          })),
+        });
+      }
 
       return { user, mr };
+    }, {
+      timeout: 30000, // ✅ 30 seconds timeout
+      maxWait: 30000  // ✅ Max wait time
     });
 
     res.status(201).json({
-      message: "MR + User created successfully",
-      data: result,
+      success: true,
+      message: "MR created successfully",
+      data: result.mr,
     });
   } catch (error) {
     console.error("Error adding MR:", error);
@@ -102,7 +91,6 @@ router.get("/", async (req, res) => {
     const mrs = await prisma.mR.findMany({
       include: {
         mrStores: {
-          // ✅ FIXED
           include: {
             store: true,
           },
@@ -114,9 +102,8 @@ router.get("/", async (req, res) => {
       id: mr.id,
       name: mr.name,
       salary: mr.salary,
-      email: mr.email, // ✅ add this
-      phone: mr.phone, // ✅ YE ADD KARNA HAI
-
+      email: mr.email,
+      phone: mr.phone,
       assigned_stores: mr.mrStores.map((s) => s.store.name),
     }));
 
@@ -137,7 +124,6 @@ router.get("/:id", async (req, res) => {
       where: { id },
       include: {
         mrStores: {
-          // ✅ FIXED
           include: {
             store: true,
           },
@@ -153,8 +139,8 @@ router.get("/:id", async (req, res) => {
       id: mr.id,
       name: mr.name,
       salary: mr.salary,
-      email: mr.email, // ✅ add this
-      phone: mr.phone, // ✅ YE ADD KARNA HAI
+      email: mr.email,
+      phone: mr.phone,
       assignedStores: mr.mrStores.map((s) => s.store.name),
     });
   } catch (error) {
@@ -163,27 +149,18 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-// 🔥 UPDATE MR
+// 🔥 UPDATE MR - Fixed Transaction Timeout
 router.put("/edit/:id", async (req, res) => {
   try {
     const prisma = req.prisma;
-
     const { name, email, phone, assignedStores, salary } = req.body;
     const id = Number(req.params.id);
 
-    if (
-      !name ||
-      !email ||
-      !phone ||
-      !Array.isArray(assignedStores) ||
-      assignedStores.length === 0 ||
-      !salary ||
-      isNaN(Number(salary))
-    ) {
+    if (!name || !email || !phone || !salary || isNaN(Number(salary))) {
       return res.status(400).json({ error: "Invalid input" });
     }
 
-    // ✅ Email duplicate check (ignore same id)
+    // ✅ Email duplicate check
     const existingEmail = await prisma.mR.findFirst({
       where: {
         email,
@@ -195,91 +172,100 @@ router.put("/edit/:id", async (req, res) => {
       return res.status(400).json({ error: "Email already exists" });
     }
 
-    // ✅ Update
+    // ✅ UPDATE with timeout
     await prisma.$transaction(async (tx) => {
+      // Update MR
       await tx.mR.update({
         where: { id },
         data: {
           name,
           email,
-          phone, // ✅ FIXED
+          phone,
           salary: Number(salary),
         },
       });
 
+      // Update store assignments
       await tx.mRStore.deleteMany({
         where: { mrId: id },
       });
 
-      const stores = await tx.store.findMany({
-        where: { name: { in: assignedStores } },
-      });
+      if (assignedStores && assignedStores.length > 0) {
+        const stores = await tx.store.findMany({
+          where: { name: { in: assignedStores } },
+        });
 
-      await tx.mRStore.createMany({
-        data: stores.map((s) => ({
-          mrId: id,
-          storeId: s.id,
-        })),
-      });
+        if (stores.length > 0) {
+          await tx.mRStore.createMany({
+            data: stores.map((s) => ({
+              mrId: id,
+              storeId: s.id,
+            })),
+          });
+        }
+      }
+    }, {
+      timeout: 30000, // ✅ 30 seconds timeout
+      maxWait: 30000
     });
 
-    res.json({ message: "MR updated successfully" });
+    res.json({ 
+      success: true,
+      message: "MR updated successfully" 
+    });
   } catch (error) {
     console.error("Error updating MR:", error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// 🔥 DELETE MR
-// 🔥 DELETE MR
+// 🔥 DELETE MR - Fixed Transaction Timeout
 router.delete("/delete/:id", async (req, res) => {
   try {
     const prisma = req.prisma;
     const id = Number(req.params.id);
 
-    // ✅ Pehle check karo MR exist karta hai?
+    // ✅ Check if MR exists
     const mrExists = await prisma.mR.findUnique({
-      where: { id }
+      where: { id },
+      select: { userId: true }
     });
-
-    console.log("MR Found:", mrExists); // 👈 Debug log
 
     if (!mrExists) {
       return res.status(404).json({ error: "MR not found" });
     }
 
+    // ✅ DELETE with timeout
     await prisma.$transaction(async (tx) => {
-      // 1️⃣ MR fetch with userId
-      const mr = await tx.mR.findUnique({
-        where: { id },
-        select: { userId: true }
-      });
-
-      console.log("MR with userId:", mr); // 👈 Debug log
-
-      // 2️⃣ Delete MRStore relations
+      // 1️⃣ Delete MRStore relations
       await tx.mRStore.deleteMany({
         where: { mrId: id }
       });
 
-      // 3️⃣ Delete MR
+      // 2️⃣ Delete MR
       await tx.mR.delete({
         where: { id }
       });
 
-      // 4️⃣ Delete associated User
-      if (mr?.userId) {
+      // 3️⃣ Delete associated User
+      if (mrExists.userId) {
         await tx.user.delete({
-          where: { id: mr.userId }
+          where: { id: mrExists.userId }
         });
-        console.log(`User with id ${mr.userId} deleted`);
       }
+    }, {
+      timeout: 30000, // ✅ 30 seconds timeout
+      maxWait: 30000
     });
 
-    res.json({ message: "MR and associated user deleted successfully" });
+    res.json({ 
+      success: true,
+      message: "MR deleted successfully" 
+    });
   } catch (error) {
     console.error("Error deleting MR:", error);
     res.status(500).json({ error: error.message });
   }
 });
+
 module.exports = router;

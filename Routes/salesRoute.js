@@ -1,90 +1,103 @@
 const express = require("express");
 const router = express.Router();
 
-// ➕ ADD SALE
 router.post("/add", async (req, res) => {
   try {
-    const { mr_id, store_id, total_sales, date, photo } = req.body;
+    console.log("🔥 BODY AA RHA HAI:", JSON.stringify(req.body, null, 2));
 
-    if (!mr_id || !store_id || !total_sales || !date) {
+    const { mrId, storeId, medicines } = req.body;
+
+    if (mrId === undefined || storeId === undefined || !Array.isArray(medicines)) {
       return res.status(400).json({ error: "All fields required" });
     }
 
-    const sale = await req.prisma.sale.create({
-      data: {
-        mrId: Number(mr_id),
-        storeId: Number(store_id),
-        totalSales: Number(total_sales),
-        date: new Date(date),
-        photo
-      }
-    });
+    const validMedicines = medicines.filter(
+      (m) => m.productName && m.quantity && m.price
+    );
 
-    res.status(201).json({ saleID: sale.id });
-
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Failed to create sale" });
-  }
-});
-
-
-// 💊 ADD SALE DETAIL
-router.post("/salesdetail", async (req, res) => {
-  try {
-    const { saleID, medicine_name, quantity, price, total_price, date } = req.body;
-
-    if (!saleID || !medicine_name || !quantity || !price || !total_price || !date) {
-      return res.status(400).json({ error: "Missing required fields" });
+    if (validMedicines.length === 0) {
+      return res.status(400).json({ error: "Valid medicines required" });
     }
 
-    await req.prisma.$transaction(async (tx) => {
+    // ✅ Process each medicine individually
+    const createdSales = [];
+    const errors = [];
+    
+    for (let i = 0; i < validMedicines.length; i++) {
+      const item = validMedicines[i];
+      const { productName, quantity, price } = item;
+      
+      try {
+        console.log(`📦 Processing ${i + 1}/${validMedicines.length}: ${productName}`);
 
-      // ✅ Check stock
-      const stock = await tx.stock.findUnique({
-        where: { medicineName: medicine_name }
-      });
+        // ✅ Check stock - Simple case-sensitive search for MySQL/TiDB
+        const stock = await req.prisma.stock.findFirst({
+          where: { 
+            productName: productName  // Exact match
+          }
+        });
 
-      if (!stock) {
-        throw new Error("Medicine not found in stock");
-      }
-
-      if (stock.totalQuantity < quantity) {
-        throw new Error("Insufficient stock");
-      }
-
-      // ✅ Create sale detail
-      await tx.saleDetail.create({
-        data: {
-          saleId: Number(saleID),
-          medicineName: medicine_name,
-          quantity: Number(quantity),
-          price: Number(price),
-          totalPrice: Number(total_price),
-          date: new Date(date)
+        if (!stock) {
+          throw new Error(`${productName} not found in stock`);
         }
-      });
 
-      // ✅ Update stock
-      await tx.stock.update({
-        where: { medicineName: medicine_name },
-        data: {
-          totalQuantity: stock.totalQuantity - quantity
+        if (stock.quantity < quantity) {
+          throw new Error(`${productName} insufficient stock. Available: ${stock.quantity}`);
         }
-      });
 
-    });
+        // ✅ CREATE SALE
+        const sale = await req.prisma.sale.create({
+          data: {
+            mrId: Number(mrId),
+            storeId: Number(storeId),
+            productName: productName,
+            quantity: Number(quantity),
+            price: Number(price),
+            saleDate: new Date()
+          }
+        });
+
+        // ✅ Update stock
+        await req.prisma.stock.update({
+          where: { id: stock.id },
+          data: { quantity: stock.quantity - quantity }
+        });
+
+        createdSales.push(sale);
+        console.log(`✅ Sale created for ${productName}, ID: ${sale.id}`);
+
+      } catch (itemError) {
+        console.error(`❌ Failed for ${productName}:`, itemError.message);
+        errors.push({
+          productName,
+          error: itemError.message
+        });
+      }
+    }
+
+    if (createdSales.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: "No sales could be processed",
+        errors: errors
+      });
+    }
+
+    const totalAmount = createdSales.reduce((sum, sale) => sum + (sale.price * sale.quantity), 0);
 
     res.status(201).json({
-      message: "Sale detail added & stock updated"
+      success: true,
+      message: `${createdSales.length} out of ${validMedicines.length} sale(s) created successfully`,
+      sales: createdSales,
+      totalAmount: totalAmount,
+      errors: errors.length > 0 ? errors : undefined
     });
 
   } catch (error) {
-    console.error(error.message);
+    console.error("❌ ERROR:", error.message);
     res.status(400).json({ error: error.message });
   }
 });
-
 
 // 📅 CURRENT DAY SALES
 router.get("/currentday-sales/mr/:mrId", async (req, res) => {
@@ -99,40 +112,37 @@ router.get("/currentday-sales/mr/:mrId", async (req, res) => {
 
     const sales = await req.prisma.sale.findMany({
       where: {
-        mrId,
-        date: { gte: start, lte: end }
+        mrId: mrId,
+        saleDate: { gte: start, lte: end }
       },
       include: {
         store: true,
-        details: true
+        mr: true
       },
-      orderBy: { date: "desc" }
+      orderBy: { saleDate: "desc" }
     });
 
-    const formatted = sales.flatMap(sale =>
-      sale.details.map(detail => ({
-        sale_id: sale.id,
-        total_sales: sale.totalSales,
-        sale_date: sale.date,
-        photo: sale.photo,
-        detail_id: detail.id,
-        medicine_name: detail.medicineName,
-        quantity: detail.quantity,
-        price: detail.price,
-        total_price: detail.totalPrice,
-        store_id: sale.store.id,
-        store_name: sale.store.name
-      }))
-    );
+    // Format as per frontend expectation
+    const formatted = sales.map(sale => ({
+      sale_id: sale.id,
+      total_sales: sale.price * sale.quantity,
+      sale_date: sale.saleDate,
+      medicine_name: sale.productName,
+      quantity: sale.quantity,
+      price: sale.price,
+      total_price: sale.price * sale.quantity,
+      store_id: sale.store?.id,
+      store_name: sale.store?.name,
+      mr_name: sale.mr?.name
+    }));
 
     res.json(formatted);
 
   } catch (error) {
-    console.error(error);
+    console.error("❌ Error:", error.message);
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
-
 
 // 📊 ALL SALES
 router.get("/all", async (req, res) => {
@@ -142,20 +152,16 @@ router.get("/all", async (req, res) => {
     let where = {};
     const now = new Date();
 
-    if (filter) {
-      if (filter === "last7days") {
-        where.date = { gte: new Date(new Date().setDate(now.getDate() - 7)) };
-      }
-      if (filter === "last15days") {
-        where.date = { gte: new Date(new Date().setDate(now.getDate() - 15)) };
-      }
-      if (filter === "last30days") {
-        where.date = { gte: new Date(new Date().setDate(now.getDate() - 30)) };
-      }
+    if (filter === "last7days") {
+      where.saleDate = { gte: new Date(now.setDate(now.getDate() - 7)) };
+    } else if (filter === "last15days") {
+      where.saleDate = { gte: new Date(now.setDate(now.getDate() - 15)) };
+    } else if (filter === "last30days") {
+      where.saleDate = { gte: new Date(now.setDate(now.getDate() - 30)) };
     }
 
     if (startDate && endDate) {
-      where.date = {
+      where.saleDate = {
         gte: new Date(startDate),
         lte: new Date(endDate)
       };
@@ -165,29 +171,31 @@ router.get("/all", async (req, res) => {
       where,
       include: {
         mr: true,
-        store: true,
-        details: true
+        store: true
       },
-      orderBy: { date: "desc" }
+      orderBy: { saleDate: "desc" }
     });
 
-    const formatted = sales.flatMap(sale =>
-      sale.details.map(d => ({
-        saleID: sale.id,
-        medicine_name: d.medicineName,
-        quantity: d.quantity,
-        price: d.price,
-        date: sale.date,
-        mr_name: sale.mr.name,
-        store_name: sale.store.name
-      }))
-    );
+    const formatted = sales.map(sale => ({
+      saleID: sale.id,
+      medicine_name: sale.productName,
+      quantity: sale.quantity,
+      price: sale.price,
+      total_amount: sale.price * sale.quantity,
+      date: sale.saleDate,
+      mr_name: sale.mr?.name,
+      store_name: sale.store?.name
+    }));
 
-    res.status(200).json({ success: true, sales: formatted });
+    res.status(200).json({ 
+      success: true, 
+      sales: formatted,
+      total: formatted.length 
+    });
 
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ success: false });
+    console.error("❌ Error:", error.message);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
