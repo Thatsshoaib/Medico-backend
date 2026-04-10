@@ -17,17 +17,22 @@ const getTodayRange = () => {
   return { start, end, now };
 };
 
-
-
-// ✅ POST /mark attendance
+// ✅ POST /mark attendance (WITH PHOTO)
 router.post("/mark", async (req, res) => {
   try {
-    const { mr_id, status } = req.body;
+    const { mr_id, status, photoUrl } = req.body;
 
-    // ✅ Validation
+    // ✅ Validate required fields
     if (!mr_id || !status) {
       return res.status(400).json({
         message: "MR ID and status are required",
+      });
+    }
+
+    // ✅ Validate photo is mandatory
+    if (!photoUrl) {
+      return res.status(400).json({
+        message: "Photo is mandatory for marking attendance",
       });
     }
 
@@ -75,25 +80,25 @@ router.post("/mark", async (req, res) => {
       });
     }
 
-    // ✅ Create attendance
+    // ✅ Create attendance WITH photoUrl
     const newAttendance = await prisma.attendance.create({
       data: {
         mrId: mrId,
         status: finalStatus,
         date: now,
         checkInTime: now,
+        photoUrl: photoUrl, // ✅ SAVE PHOTO URL
       },
     });
 
     res.status(201).json({
       message: "Attendance marked successfully",
+      success: true,
       data: newAttendance,
     });
-
   } catch (error) {
     console.error("Error marking attendance:", error);
 
-    // ✅ Unique constraint safety
     if (error.code === "P2002") {
       return res.status(409).json({
         message: "Attendance already marked",
@@ -103,8 +108,6 @@ router.post("/mark", async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 });
-
-
 
 // ✅ GET /status/:mr_id
 router.get("/status/:mr_id", async (req, res) => {
@@ -131,13 +134,11 @@ router.get("/status/:mr_id", async (req, res) => {
       attendanceMarked: !!existing,
       data: existing || null,
     });
-
   } catch (error) {
     console.error("Error:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 });
-
 
 // ✅ GET /history/:mr_id - Sirf specific MR ki attendance
 router.get("/history/:mr_id", async (req, res) => {
@@ -146,30 +147,27 @@ router.get("/history/:mr_id", async (req, res) => {
     const { page = 1, limit = 10 } = req.query;
 
     if (isNaN(mrId)) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Invalid MR ID" 
+      return res.status(400).json({
+        success: false,
+        message: "Invalid MR ID",
       });
     }
 
-    // Check if MR exists
     const mr = await prisma.mR.findUnique({
-      where: { id: mrId }
+      where: { id: mrId },
     });
 
     if (!mr) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "MR not found" 
+      return res.status(404).json({
+        success: false,
+        message: "MR not found",
       });
     }
 
-    // Get total count for pagination
     const total = await prisma.attendance.count({
-      where: { mrId: mrId }
+      where: { mrId: mrId },
     });
 
-    // Get paginated attendance for specific MR
     const attendance = await prisma.attendance.findMany({
       where: { mrId: mrId },
       skip: (page - 1) * Number(limit),
@@ -194,6 +192,7 @@ router.get("/history/:mr_id", async (req, res) => {
       date: a.date,
       checkInTime: a.checkInTime,
       checkOutTime: a.checkOutTime,
+      photoUrl: a.photoUrl, // ✅ Include photo URL in response
     }));
 
     res.status(200).json({
@@ -203,7 +202,6 @@ router.get("/history/:mr_id", async (req, res) => {
       page: Number(page),
       totalPages: Math.ceil(total / Number(limit)),
     });
-
   } catch (error) {
     console.error("❌ Error fetching MR attendance:", error);
     res.status(500).json({
@@ -213,23 +211,20 @@ router.get("/history/:mr_id", async (req, res) => {
   }
 });
 
-// ✅ Existing /history endpoint ko modify karo with optional mr_id filter
+// ✅ GET /history - All attendance (with optional mr_id filter)
 router.get("/history", async (req, res) => {
   try {
     const { page = 1, limit = 10, mr_id } = req.query;
 
-    // Build where clause
     let whereClause = {};
     if (mr_id) {
       whereClause.mrId = Number(mr_id);
     }
 
-    // Get total count
     const total = await prisma.attendance.count({
-      where: whereClause
+      where: whereClause,
     });
 
-    // Get attendance with optional filter
     const attendance = await prisma.attendance.findMany({
       where: whereClause,
       skip: (page - 1) * Number(limit),
@@ -254,6 +249,7 @@ router.get("/history", async (req, res) => {
       date: a.date,
       checkInTime: a.checkInTime,
       checkOutTime: a.checkOutTime,
+      photoUrl: a.photoUrl, // ✅ Include photo URL in response
     }));
 
     res.status(200).json({
@@ -263,7 +259,6 @@ router.get("/history", async (req, res) => {
       page: Number(page),
       totalPages: Math.ceil(total / Number(limit)),
     });
-
   } catch (error) {
     console.error("❌ Error fetching attendance:", error);
     res.status(500).json({
@@ -272,6 +267,5 @@ router.get("/history", async (req, res) => {
     });
   }
 });
-
 
 module.exports = router;

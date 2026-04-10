@@ -5,7 +5,7 @@ router.post("/add", async (req, res) => {
   try {
     console.log("🔥 BODY AA RHA HAI:", JSON.stringify(req.body, null, 2));
 
-    const { mrId, storeId, medicines } = req.body;
+    const { mrId, storeId, medicines, photoUrl } = req.body;
 
     if (mrId === undefined || storeId === undefined || !Array.isArray(medicines)) {
       return res.status(400).json({ error: "All fields required" });
@@ -19,7 +19,6 @@ router.post("/add", async (req, res) => {
       return res.status(400).json({ error: "Valid medicines required" });
     }
 
-    // ✅ Process each medicine individually
     const createdSales = [];
     const errors = [];
     
@@ -30,11 +29,8 @@ router.post("/add", async (req, res) => {
       try {
         console.log(`📦 Processing ${i + 1}/${validMedicines.length}: ${productName}`);
 
-        // ✅ Check stock - Simple case-sensitive search for MySQL/TiDB
         const stock = await req.prisma.stock.findFirst({
-          where: { 
-            productName: productName  // Exact match
-          }
+          where: { productName: productName }
         });
 
         if (!stock) {
@@ -45,19 +41,19 @@ router.post("/add", async (req, res) => {
           throw new Error(`${productName} insufficient stock. Available: ${stock.quantity}`);
         }
 
-        // ✅ CREATE SALE
+        // ✅ FIX: Use connect syntax for relations
         const sale = await req.prisma.sale.create({
           data: {
-            mrId: Number(mrId),
-            storeId: Number(storeId),
+            mr: { connect: { id: Number(mrId) } },        // ✅ Connect to MR
+            store: { connect: { id: Number(storeId) } },  // ✅ Connect to Store
             productName: productName,
             quantity: Number(quantity),
             price: Number(price),
-            saleDate: new Date()
+            saleDate: new Date(),
+            photoUrl: photoUrl || null
           }
         });
 
-        // ✅ Update stock
         await req.prisma.stock.update({
           where: { id: stock.id },
           data: { quantity: stock.quantity - quantity }
@@ -112,7 +108,7 @@ router.get("/currentday-sales/mr/:mrId", async (req, res) => {
 
     const sales = await req.prisma.sale.findMany({
       where: {
-        mrId: mrId,
+        mr: { id: mrId },  // ✅ Use relation
         saleDate: { gte: start, lte: end }
       },
       include: {
@@ -122,7 +118,6 @@ router.get("/currentday-sales/mr/:mrId", async (req, res) => {
       orderBy: { saleDate: "desc" }
     });
 
-    // Format as per frontend expectation
     const formatted = sales.map(sale => ({
       sale_id: sale.id,
       total_sales: sale.price * sale.quantity,
@@ -133,7 +128,8 @@ router.get("/currentday-sales/mr/:mrId", async (req, res) => {
       total_price: sale.price * sale.quantity,
       store_id: sale.store?.id,
       store_name: sale.store?.name,
-      mr_name: sale.mr?.name
+      mr_name: sale.mr?.name,
+      photoUrl: sale.photoUrl
     }));
 
     res.json(formatted);
@@ -184,7 +180,8 @@ router.get("/all", async (req, res) => {
       total_amount: sale.price * sale.quantity,
       date: sale.saleDate,
       mr_name: sale.mr?.name,
-      store_name: sale.store?.name
+      store_name: sale.store?.name,
+      photoUrl: sale.photoUrl
     }));
 
     res.status(200).json({ 

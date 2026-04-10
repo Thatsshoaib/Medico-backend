@@ -60,6 +60,7 @@ const salesRoutes = require("./Routes/salesRoute");
 const attendanceRoute = require("./Routes/attendanceRoute");
 const stockRoute = require("./Routes/stockRoutes");
 const addressRoute = require("./Routes/addressRoute");
+const uploadRoute = require("./Routes/uploadRoute");
 
 app.use("/api/auth", authRoutes);
 app.use("/api/mrs", mrRoutes);
@@ -68,7 +69,7 @@ app.use("/api/sales", salesRoutes);
 app.use("/api/attendance", attendanceRoute);
 app.use("/api/stock", stockRoute);
 app.use("/api/address", addressRoute);
-
+app.use("/api", uploadRoute);
 // ✅ Test route
 app.get("/api/test", async (req, res) => {
   try {
