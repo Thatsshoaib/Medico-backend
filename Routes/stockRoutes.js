@@ -71,17 +71,53 @@ router.get("/get-med", async (req, res) => {
     
     const meds = await prisma.stock.findMany({
       select: {
+        id: true,
         productName: true,
+        price: true,
+        quantity: true,
       },
+      distinct: ['productName'], // Agar same naam ki multiple entries hain to unique lene ke liye
+      orderBy: {
+        productName: 'asc'
+      }
     });
 
+    // Group by productName and keep latest price (optional)
+    const medicineMap = new Map();
+    
+    meds.forEach(med => {
+      // Agar same product multiple times hai, to latest price use karo
+      // Ya average price nikal sakte ho
+      if (!medicineMap.has(med.productName)) {
+        medicineMap.set(med.productName, {
+          id: med.id,
+          productName: med.productName,
+          price: med.price,
+          quantity: med.quantity
+        });
+      }
+    });
+
+    const medicines = Array.from(medicineMap.values());
+
     res.json({
-      medicines: meds.map((m) => m.productName),
+      success: true,
+      medicines: medicines,
+      // Alternative: Agar simple array of objects chahiye
+      // medicines: meds.map(m => ({
+      //   id: m.id,
+      //   name: m.productName,
+      //   price: m.price,
+      //   quantity: m.quantity
+      // }))
     });
 
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Error fetching medicines" });
+    console.error('Error fetching medicines:', error);
+    res.status(500).json({ 
+      success: false,
+      message: "Error fetching medicines" 
+    });
   }
 });
 
