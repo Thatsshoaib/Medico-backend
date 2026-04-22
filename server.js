@@ -62,6 +62,8 @@ const stockRoute = require("./Routes/stockRoutes");
 const addressRoute = require("./Routes/addressRoute");
 const uploadRoute = require("./Routes/uploadRoute");
 
+
+
 app.use("/api/auth", authRoutes);
 app.use("/api/mrs", mrRoutes);
 app.use("/api/stores", storeRoutes);
