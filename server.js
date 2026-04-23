@@ -5,54 +5,61 @@ const path = require("path");
 
 dotenv.config();
 
-// ✅ 🔥 FIX BigInt serialization
 BigInt.prototype.toJSON = function () {
   return this.toString();
 };
 
 const { PrismaClient } = require("@prisma/client");
-
-// ✅ Prisma Client
 const prisma = new PrismaClient();
 
 const app = express();
 
-// ✅ CORS CONFIG (FINAL FIX)
+/* ================================
+   ✅ CORS FIX (FINAL WORKING)
+================================ */
 const allowedOrigins = [
   "http://localhost:5173",
   "http://127.0.0.1:5173",
-  "https://medico-sandy-seven.vercel.app" // 🔥 VERCEL FRONTEND
+  "http://medic.ruglens.com",
+  "https://medic.ruglens.com",
+  "https://medico-sandy-seven.vercel.app"
 ];
 
 app.use(
   cors({
     origin: function (origin, callback) {
-      // ✅ allow Postman / mobile apps (no origin)
+      // allow tools like Postman
       if (!origin) return callback(null, true);
 
-      if (allowedOrigins.includes(origin)) {
+      if (
+        allowedOrigins.includes(origin) ||
+        origin?.endsWith(".ruglens.com") // 🔥 subdomain support
+      ) {
         return callback(null, true);
       } else {
-        return callback(new Error("❌ Not allowed by CORS"));
+        console.log("❌ Blocked by CORS:", origin);
+        return callback(null, false); // don't crash server
       }
     },
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
     credentials: true,
   })
 );
 
-// ✅ Handle preflight requests (IMPORTANT)
-app.options("*", cors());
-
-// ✅ Middleware
+/* ================================
+   Middleware
+================================ */
 app.use(express.json());
 
-// ✅ Prisma middleware
 app.use((req, res, next) => {
   req.prisma = prisma;
   next();
 });
 
-// ✅ Routes
+/* ================================
+   Routes
+================================ */
 const authRoutes = require("./Routes/authRoutes");
 const storeRoutes = require("./Routes/storeRoutes");
 const mrRoutes = require("./Routes/mrRoutes");
@@ -62,8 +69,6 @@ const stockRoute = require("./Routes/stockRoutes");
 const addressRoute = require("./Routes/addressRoute");
 const uploadRoute = require("./Routes/uploadRoute");
 
-
-
 app.use("/api/auth", authRoutes);
 app.use("/api/mrs", mrRoutes);
 app.use("/api/stores", storeRoutes);
@@ -72,13 +77,17 @@ app.use("/api/attendance", attendanceRoute);
 app.use("/api/stock", stockRoute);
 app.use("/api/address", addressRoute);
 app.use("/api", uploadRoute);
-// ✅ Test route
+
+/* ================================
+   Test Route
+================================ */
 app.get("/api/test", async (req, res) => {
   try {
     const result = await req.prisma.$queryRaw`SELECT 1 as connected`;
+
     res.json({
       success: true,
-      message: "✅ Database connected!",
+      message: "DB Connected",
       result,
     });
   } catch (error) {
@@ -86,13 +95,9 @@ app.get("/api/test", async (req, res) => {
   }
 });
 
-// ✅ Serve frontend (optional)
-app.use(express.static(path.join(__dirname, "dist")));
-app.get("*", (req, res) => {
-  res.sendFile(path.join(__dirname, "dist", "index.html"));
-});
-
-// ✅ Start server
+/* ================================
+   Start Server
+================================ */
 const PORT = process.env.PORT || 5000;
 
 async function startServer() {
@@ -101,8 +106,7 @@ async function startServer() {
     console.log("✅ DB Connected");
 
     app.listen(PORT, () => {
-      console.log(`🚀 Server running on port ${PORT}`);
-      console.log(`📡 http://localhost:${PORT}/api/test`);
+      console.log(`🚀 Server running on ${PORT}`);
     });
   } catch (err) {
     console.error("❌ DB Error:", err);
@@ -111,9 +115,10 @@ async function startServer() {
 
 startServer();
 
-// ✅ Graceful shutdown
+/* ================================
+   Graceful Shutdown
+================================ */
 process.on("SIGINT", async () => {
   await prisma.$disconnect();
-  console.log("Disconnected Prisma");
   process.exit(0);
 });
