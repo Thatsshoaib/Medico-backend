@@ -1,13 +1,15 @@
 const express = require("express");
 const router = express.Router();
 
-
+/**
+ * ➤ CREATE STORE
+ */
 router.post("/", async (req, res) => {
   try {
     const prisma = req.prisma;
     const { name, address, contact } = req.body;
 
-    if (!name || name.length < 2 || !address) {
+    if (!name || name.trim().length < 2 || !address) {
       return res.status(400).json({
         error: "Valid name and address required"
       });
@@ -17,7 +19,7 @@ router.post("/", async (req, res) => {
       data: {
         name: name.trim(),
         address: address.trim(),
-        contact: contact || null
+        contact: contact ? contact.trim() : null
       }
     });
 
@@ -37,12 +39,23 @@ router.post("/", async (req, res) => {
   }
 });
 
+
+/**
+ * ➤ GET ALL STORES
+ */
 router.get("/", async (req, res) => {
   try {
     const prisma = req.prisma;
 
     const stores = await prisma.store.findMany({
-      orderBy: { createdAt: "desc" }
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        name: true,
+        address: true,
+        contact: true,
+        createdAt: true
+      }
     });
 
     res.json(stores);
@@ -53,6 +66,9 @@ router.get("/", async (req, res) => {
 });
 
 
+/**
+ * ➤ GET STORE BY ID
+ */
 router.get("/:id", async (req, res) => {
   try {
     const prisma = req.prisma;
@@ -61,7 +77,7 @@ router.get("/:id", async (req, res) => {
     const store = await prisma.store.findUnique({
       where: { id },
       include: {
-        mrs: {
+        mrStores: {
           include: {
             mr: true
           }
@@ -74,10 +90,10 @@ router.get("/:id", async (req, res) => {
       return res.status(404).json({ error: "Store not found" });
     }
 
-    // clean response
     const formatted = {
       ...store,
-      mrs: store.mrs.map(s => s.mr)
+      contact: store.contact || null,
+      mrs: store.mrStores.map(s => s.mr)
     };
 
     res.json(formatted);
@@ -88,6 +104,10 @@ router.get("/:id", async (req, res) => {
   }
 });
 
+
+/**
+ * ➤ GET STORES ASSIGNED TO MR
+ */
 router.get("/assign-stores/:mrId", async (req, res) => {
   try {
     const prisma = req.prisma;
@@ -100,7 +120,10 @@ router.get("/assign-stores/:mrId", async (req, res) => {
       }
     });
 
-    const stores = mrStores.map(ms => ms.store);
+    const stores = mrStores.map(ms => ({
+      ...ms.store,
+      contact: ms.store.contact || null
+    }));
 
     res.json(stores);
 
@@ -111,6 +134,9 @@ router.get("/assign-stores/:mrId", async (req, res) => {
 });
 
 
+/**
+ * ➤ UPDATE STORE
+ */
 router.put("/:id", async (req, res) => {
   try {
     const prisma = req.prisma;
@@ -120,9 +146,11 @@ router.put("/:id", async (req, res) => {
     const updated = await prisma.store.update({
       where: { id },
       data: {
-        name,
-        address,
-        contact: contact || null
+        name: name ? name.trim() : undefined,
+        address: address ? address.trim() : undefined,
+        contact: contact !== undefined
+          ? (contact ? contact.trim() : null)
+          : undefined
       }
     });
 
@@ -139,6 +167,9 @@ router.put("/:id", async (req, res) => {
 });
 
 
+/**
+ * ➤ DELETE STORE
+ */
 router.delete("/:id", async (req, res) => {
   try {
     const prisma = req.prisma;
@@ -161,4 +192,4 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
-module.exports = router; 
+module.exports = router;

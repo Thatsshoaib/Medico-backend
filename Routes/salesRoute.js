@@ -341,6 +341,7 @@ router.get("/all", async (req, res) => {
       date: sale.saleDate,
       mr_name: sale.mr?.name,
       store_name: sale.store?.name,
+      store_contact : sale.store?.contact,
       photoUrl: sale.photoUrl
     }));
 
