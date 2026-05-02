@@ -10,9 +10,7 @@ router.post("/add", async (req, res) => {
 
     // ✅ Validation
     if (!name || !email || !phone || !password || !salary || isNaN(Number(salary))) {
-      return res.status(400).json({
-        error: "All fields required",
-      });
+      return res.status(400).json({ error: "All fields required" });
     }
 
     // ✅ Check existing user
@@ -24,17 +22,45 @@ router.post("/add", async (req, res) => {
       return res.status(400).json({ error: "Email already exists" });
     }
 
-    // ✅ Fetch stores
+    // ✅ Normalize stores
+    const storeNames = assignedStores || [];
+
+    // ✅ 🔥 CHECK STORE ALREADY ASSIGNED (FAST QUERY)
+    if (storeNames.length > 0) {
+      const conflicts = await prisma.mRStore.findMany({
+        where: {
+          store: {
+            name: { in: storeNames }
+          }
+        },
+        select: {
+          store: {
+            select: { name: true }
+          }
+        }
+      });
+
+      if (conflicts.length > 0) {
+        const names = conflicts.map(c => c.store.name);
+
+        return res.status(400).json({
+          error: `Already assigned store(s): ${names.join(", ")}`
+        });
+      }
+    }
+
+    // ✅ Fetch stores (only id needed)
     const stores = await prisma.store.findMany({
-      where: { name: { in: assignedStores || [] } },
+      where: { name: { in: storeNames } },
+      select: { id: true }
     });
 
-    // ✅ Hash password
+    // ✅ Hash password (outside tx)
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // ✅ USE TRANSACTION WITH TIMEOUT
+    // ✅ 🔥 SHORT TRANSACTION (NO EXTRA LOGIC INSIDE)
     const result = await prisma.$transaction(async (tx) => {
-      // 1️⃣ Create USER
+
       const user = await tx.user.create({
         data: {
           name,
@@ -44,7 +70,6 @@ router.post("/add", async (req, res) => {
         },
       });
 
-      // 2️⃣ Create MR
       const mr = await tx.mR.create({
         data: {
           name,
@@ -55,9 +80,7 @@ router.post("/add", async (req, res) => {
         },
       });
 
-      // 3️⃣ Assign stores (if any)
       if (stores.length > 0) {
-        // Use createMany for better performance
         await tx.mRStore.createMany({
           data: stores.map((store) => ({
             mrId: mr.id,
@@ -66,10 +89,19 @@ router.post("/add", async (req, res) => {
         });
       }
 
-      return { user, mr };
+      await tx.mRSalary.create({
+        data: {
+          mrId: mr.id,
+          baseSalary: Number(salary),
+          effectiveFrom: new Date(),
+        },
+      });
+
+      return { mr };
+
     }, {
-      timeout: 30000, // ✅ 30 seconds timeout
-      maxWait: 30000  // ✅ Max wait time
+      timeout: 20000,
+      maxWait: 20000
     });
 
     res.status(201).json({
@@ -77,8 +109,23 @@ router.post("/add", async (req, res) => {
       message: "MR created successfully",
       data: result.mr,
     });
+
   } catch (error) {
     console.error("Error adding MR:", error);
+
+    // 🔥 Handle unique constraint (extra safety)
+    if (error.code === "P2002") {
+      return res.status(400).json({
+        error: "One or more stores are already assigned"
+      });
+    }
+
+    if (error.code === "P2028") {
+      return res.status(500).json({
+        error: "Transaction failed, please try again"
+      });
+    }
+
     res.status(500).json({ error: error.message });
   }
 });
@@ -172,9 +219,36 @@ router.put("/edit/:id", async (req, res) => {
       return res.status(400).json({ error: "Email already exists" });
     }
 
-    // ✅ UPDATE with timeout
+    // ✅ 🔥 CHECK STORE CONFLICT (exclude current MR)
+if (assignedStores && assignedStores.length > 0) {
+  const conflicts = await prisma.mRStore.findMany({
+    where: {
+      store: {
+        name: { in: assignedStores }
+      },
+      NOT: {
+        mrId: id
+      }
+    },
+    include: { store: true }
+  });
+
+  if (conflicts.length > 0) {
+    const names = conflicts.map(c => c.store.name);
+
+    return res.status(400).json({
+      error: `Already assigned store(s): ${names.join(", ")}`
+    });
+  }
+}
+
     await prisma.$transaction(async (tx) => {
-      // Update MR
+
+      const existingMR = await tx.mR.findUnique({
+        where: { id },
+        select: { salary: true },
+      });
+
       await tx.mR.update({
         where: { id },
         data: {
@@ -185,7 +259,18 @@ router.put("/edit/:id", async (req, res) => {
         },
       });
 
-      // Update store assignments
+      // ✅ Salary change tracking
+      if (existingMR.salary !== Number(salary)) {
+        await tx.mRSalary.create({
+          data: {
+            mrId: id,
+            baseSalary: Number(salary),
+            effectiveFrom: new Date(),
+          },
+        });
+      }
+
+      // ✅ Update stores
       await tx.mRStore.deleteMany({
         where: { mrId: id },
       });
@@ -204,15 +289,17 @@ router.put("/edit/:id", async (req, res) => {
           });
         }
       }
+
     }, {
-      timeout: 30000, // ✅ 30 seconds timeout
+      timeout: 30000,
       maxWait: 30000
     });
 
-    res.json({ 
+    res.json({
       success: true,
-      message: "MR updated successfully" 
+      message: "MR updated successfully"
     });
+
   } catch (error) {
     console.error("Error updating MR:", error);
     res.status(500).json({ error: error.message });

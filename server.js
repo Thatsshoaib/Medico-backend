@@ -68,6 +68,7 @@ const attendanceRoute = require("./Routes/attendanceRoute");
 const stockRoute = require("./Routes/stockRoutes");
 const addressRoute = require("./Routes/addressRoute");
 const uploadRoute = require("./Routes/uploadRoute");
+const salaryRoutes = require("./Routes/salaryRoutes");
 
 app.use("/api/auth", authRoutes);
 app.use("/api/mrs", mrRoutes);
@@ -77,6 +78,7 @@ app.use("/api/attendance", attendanceRoute);
 app.use("/api/stock", stockRoute);
 app.use("/api/address", addressRoute);
 app.use("/api", uploadRoute);
+app.use("/api/salary", salaryRoutes);
 
 /* ================================
    Test Route

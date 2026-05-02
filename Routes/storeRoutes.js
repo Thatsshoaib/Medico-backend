@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 
 /**
- * ➤ CREATE STORE
+ * ➤ CREATE SINGLE STORE
  */
 router.post("/", async (req, res) => {
   try {
@@ -39,6 +39,151 @@ router.post("/", async (req, res) => {
   }
 });
 
+/**
+ * ➤ BULK CREATE STORES (NEW)
+ * Accepts an array of stores and creates them in batch
+ */
+router.post("/bulk", async (req, res) => {
+  try {
+    const prisma = req.prisma;
+    const { stores } = req.body;
+
+    // Validate input
+    if (!stores || !Array.isArray(stores) || stores.length === 0) {
+      return res.status(400).json({
+        error: "Invalid request. Expected array of stores with name and address"
+      });
+    }
+
+    const results = {
+      successful: [],
+      failed: [],
+      total: stores.length
+    };
+
+    // Process each store one by one (to handle validation errors gracefully)
+    for (let i = 0; i < stores.length; i++) {
+      const store = stores[i];
+      const { name, address, contact } = store;
+
+      // Validate required fields
+      if (!name || name.trim().length < 2 || !address) {
+        results.failed.push({
+          index: i,
+          data: store,
+          error: "Valid name and address required"
+        });
+        continue;
+      }
+
+      try {
+        const createdStore = await prisma.store.create({
+          data: {
+            name: name.trim(),
+            address: address.trim(),
+            contact: contact ? contact.trim() : null
+          }
+        });
+
+        results.successful.push({
+          index: i,
+          original: store,
+          created: createdStore
+        });
+      } catch (error) {
+        // Handle duplicate entries
+        if (error.code === "P2002") {
+          results.failed.push({
+            index: i,
+            data: store,
+            error: "Store already exists"
+          });
+        } else {
+          results.failed.push({
+            index: i,
+            data: store,
+            error: error.message
+          });
+        }
+      }
+    }
+
+    res.status(201).json({
+      success: true,
+      message: `Successfully created ${results.successful.length} out of ${stores.length} stores`,
+      results: {
+        successfulCount: results.successful.length,
+        failedCount: results.failed.length,
+        successful: results.successful,
+        failed: results.failed
+      }
+    });
+
+  } catch (error) {
+    console.error("Bulk create error:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+/**
+ * ➤ BULK CREATE STORES WITH TRANSACTION (Alternate approach)
+ * Uses Prisma transaction - either all succeed or all fail
+ */
+router.post("/bulk-transaction", async (req, res) => {
+  try {
+    const prisma = req.prisma;
+    const { stores } = req.body;
+
+    if (!stores || !Array.isArray(stores) || stores.length === 0) {
+      return res.status(400).json({
+        error: "Invalid request. Expected array of stores"
+      });
+    }
+
+    // Validate all stores first
+    for (const store of stores) {
+      if (!store.name || store.name.trim().length < 2 || !store.address) {
+        return res.status(400).json({
+          error: "Each store must have valid name and address"
+        });
+      }
+    }
+
+    // Prepare data for bulk creation
+    const storesData = stores.map(store => ({
+      name: store.name.trim(),
+      address: store.address.trim(),
+      contact: store.contact ? store.contact.trim() : null
+    }));
+
+    // Create all stores in a transaction
+    const createdStores = await prisma.$transaction(
+      storesData.map(storeData => 
+        prisma.store.create({ data: storeData })
+      )
+    );
+
+    res.status(201).json({
+      success: true,
+      message: `Successfully created ${createdStores.length} stores`,
+      stores: createdStores
+    });
+
+  } catch (error) {
+    console.error("Bulk transaction error:", error);
+    
+    if (error.code === "P2002") {
+      return res.status(400).json({ 
+        error: "One or more stores already exist. Transaction rolled back." 
+      });
+    }
+    
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// Rest of your existing endpoints remain the same...
+// GET, PUT, DELETE, etc.
 
 /**
  * ➤ GET ALL STORES
@@ -64,7 +209,6 @@ router.get("/", async (req, res) => {
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
-
 
 /**
  * ➤ GET STORE BY ID
@@ -104,7 +248,6 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-
 /**
  * ➤ GET STORES ASSIGNED TO MR
  */
@@ -132,7 +275,6 @@ router.get("/assign-stores/:mrId", async (req, res) => {
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
-
 
 /**
  * ➤ UPDATE STORE
@@ -165,7 +307,6 @@ router.put("/:id", async (req, res) => {
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
-
 
 /**
  * ➤ DELETE STORE
